@@ -15,7 +15,7 @@ from openai import OpenAI
 ENGINE_BUNDLE_TEMPLATE: Dict[str, Any] = {
     "adaptive_learning_engine_bundle": {
         "meta": {
-            "bundle_version": "1.3",
+            "bundle_version": "1.2",
             "language": "he",
             "purpose": "Course-agnostic adaptive learning engine (knowledge + style + pedagogy).",
         },
@@ -72,15 +72,16 @@ ENGINE_BUNDLE_TEMPLATE: Dict[str, Any] = {
                     },
                 },
                 "trainer_state": {"student_model": {"weak_topics": [], "repeat_misses": [], "confidence_by_topic": {}}},
-                # raw_materials will be attached at runtime (not required by schema)
             },
 
             "trainer_result_schema": {
                 "mode": "coach|examiner|exam_retry",
+
                 "score": {
                     "total": "0-100",
                     "breakdown": {"issue_spotting": "int", "rule_statement": "int", "application": "int", "conclusion": "int", "style_precision": "int"},
                 },
+
                 "diagnostics": [
                     {
                         "category": "terminology|doctrine|structure|application|comparison",
@@ -93,8 +94,11 @@ ENGINE_BUNDLE_TEMPLATE: Dict[str, Any] = {
                         "severity": "low|medium|high",
                     }
                 ],
+
                 "improved_answer": {"full_text": "string_optional", "delta": [{"action": "added|removed|reordered|rephrased|term_normalized", "where": "string", "why": "string"}]},
+
                 "sharpening_paragraph": {"title": "string_optional", "explanation": "string_optional", "memory_hook": "string_optional", "one_check_question": "string_optional"},
+
                 "comparison_to_solution": {
                     "solution_id": "string_optional",
                     "coverage_score": "0-100_optional",
@@ -102,6 +106,7 @@ ENGINE_BUNDLE_TEMPLATE: Dict[str, Any] = {
                     "extra_points": ["string_optional"],
                     "style_gap_notes": ["string_optional"]
                 },
+
                 "next_drill": {"one_question": "string_optional", "expected_points": ["string_optional"]},
                 "telemetry_updates": {"topic_miss": ["string_optional"], "repeat_miss": ["string_optional"], "confidence_delta": {"topic": "delta_optional"}},
             },
@@ -136,7 +141,6 @@ COURSE_PROFILE_META_PROMPT = """אתה אנליסט משפטי ופדגוגי.
 
 כללים:
 - החזר JSON תקין בלבד.
-- רק מהטקסט שסופק, בלי ידע חיצוני.
 - אל תמציא ציטוטים. אם אין quote, אל תכלול מקור.
 - canonical_terms יישאר ריק בשלב זה (ימולא בשלב ייעודי).
 - solutions_bank.solutions יישאר ריק בשלב זה (יימולא בשלב ייעודי).
@@ -227,11 +231,6 @@ EXAM_RETRY_COMPARE_META_PROMPT = """אתה בודק "מבחן לחזרה".
 # =========================
 
 def _extract_json_object(text: str) -> Dict[str, Any]:
-    """
-    Safe JSON extraction:
-    - First try json.loads directly.
-    - If model returned extra text, find first '{' and parse by brace-counting.
-    """
     text = (text or "").strip()
     if not text:
         raise ValueError("Empty model response.")
@@ -241,22 +240,11 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    start = text.find("{")
-    if start == -1:
+    # fallback: try to grab first JSON object
+    m = re.search(r"\{(?:[^{}]|(?R))*\}", text, flags=re.DOTALL)
+    if not m:
         raise ValueError("Model did not return a JSON object.")
-
-    depth = 0
-    for i in range(start, len(text)):
-        ch = text[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = text[start:i + 1]
-                return json.loads(candidate)
-
-    raise ValueError("Unbalanced JSON braces in model response.")
+    return json.loads(m.group(0))
 
 
 def _default_base_url() -> str:
@@ -288,36 +276,40 @@ def _pack_docs_for_model(doc_registry: List[Dict[str, Any]], doc_text_by_id: Dic
     return "\n".join(lines)
 
 
-def save_json(path: str, data: Dict[str, Any], *, gzip_if_big: bool = True, big_threshold_mb: int = 10) -> str:
+def _deepcopy_json(x: Any) -> Any:
+    return json.loads(json.dumps(x))
+
+
+def save_json(path: str, data: Dict[str, Any], gzip_if_big: bool = True, big_threshold_mb: int = 10) -> str:
     """
-    Saves JSON to disk. If gzip_if_big and file size would be large, also writes .gz version.
-    Returns the primary path written.
+    Saves JSON. If gzip_if_big and file would be big, saves as .gz.
+    Returns the path written.
     """
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    size_mb = len(raw) / (1024 * 1024)
+
+    if gzip_if_big and size_mb >= big_threshold_mb:
+        gz_path = path if path.endswith(".gz") else (path + ".gz")
+        with gzip.open(gz_path, "wb") as f:
+            f.write(raw)
+        return gz_path
 
     with open(path, "wb") as f:
         f.write(raw)
-
-    if gzip_if_big and (len(raw) / (1024 * 1024)) >= big_threshold_mb:
-        gz_path = path + ".gz"
-        with gzip.open(gz_path, "wb") as f:
-            f.write(raw)
-
     return path
 
 
 def load_json(path: str) -> Dict[str, Any]:
     """
-    Loads JSON from path, or from path.gz if path does not exist.
+    Loads JSON from path or path.gz fallback.
     """
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(path, "rb") as f:
+            return json.loads(f.read().decode("utf-8"))
     if os.path.exists(path + ".gz"):
         with gzip.open(path + ".gz", "rb") as f:
             return json.loads(f.read().decode("utf-8"))
-    raise FileNotFoundError(f"JSON not found: {path} (or {path}.gz)")
+    raise FileNotFoundError(f"Not found: {path} (or {path}.gz)")
 
 
 # =========================
@@ -340,14 +332,23 @@ def build_course_bundle(
     TIP: כדי לקבל page, הכניסו "PAGE: N" בטקסט.
     """
 
+    if not isinstance(course_id, str) or not course_id.strip():
+        raise ValueError("course_id must be a non-empty string.")
+    if not knowledge_docs:
+        raise ValueError("knowledge_docs is required.")
+    if not style_docs:
+        raise ValueError("style_docs is required.")
+
     doc_registry: List[Dict[str, Any]] = []
     doc_text_by_id: Dict[str, str] = {}
 
     def _add_docs(docs: List[Dict[str, str]], doc_type: str, prefix: str) -> None:
         for i, d in enumerate(docs, start=1):
             doc_id = f"{prefix}{i}"
-            doc_registry.append({"doc_id": doc_id, "type": doc_type, "name": d.get("name", f"{doc_type}_{i}")})
-            doc_text_by_id[doc_id] = d.get("text", "")
+            name = d.get("name", f"{doc_type}_{i}")
+            text = d.get("text", "")
+            doc_registry.append({"doc_id": doc_id, "type": doc_type, "name": name})
+            doc_text_by_id[doc_id] = text
 
     _add_docs(knowledge_docs, "knowledge", "K")
     _add_docs(style_docs, "style", "S")
@@ -377,15 +378,23 @@ def build_course_bundle(
     # Ensure required branches exist
     course_profile.setdefault("knowledge_brain", {"doctrines": [], "statutes": [], "precedents": [], "topic_map": []})
     course_profile.setdefault("style_brain", {})
+    course_profile["style_brain"].setdefault("structure", {"detected_model": "", "templates": []})
+    course_profile["style_brain"].setdefault("voice_signature", {"mandatory_phrasing": [], "preferred_terms": [], "avoid_terms": [], "must_write_exactly": []})
+    course_profile["style_brain"].setdefault("grading_rubric", {"weights": {}, "penalty_triggers": [], "bonus_triggers": []})
+    course_profile["style_brain"].setdefault("style_sources", [])
     course_profile["style_brain"].setdefault("solutions_bank", {"enabled": True, "solutions": []})
+
     course_profile.setdefault("terminology", {})
+    course_profile["terminology"].setdefault("extraction_pipeline", ENGINE_BUNDLE_TEMPLATE["adaptive_learning_engine_bundle"]["schemas"]["course_profile_schema"]["terminology"]["extraction_pipeline"])
     course_profile["terminology"].setdefault("canonical_terms", [])
+    course_profile["terminology"].setdefault("style_preferences", ENGINE_BUNDLE_TEMPLATE["adaptive_learning_engine_bundle"]["schemas"]["course_profile_schema"]["terminology"]["style_preferences"])
+
     course_profile.setdefault("trainer_state", {"student_model": {"weak_topics": [], "repeat_misses": [], "confidence_by_topic": {}}})
 
-    # Attach FULL texts (as you requested)
+    # Optional: keep all full texts (converted texts) in profile
     if keep_full_texts_in_profile:
         course_profile["raw_materials"] = {
-            "doc_text_by_id": doc_text_by_id
+            "doc_text_by_id": doc_text_by_id,  # full texts
         }
 
     # B) Terminology extraction (knowledge+style)
@@ -412,7 +421,7 @@ def build_course_bundle(
     course_profile["style_brain"]["solutions_bank"] = {"enabled": True, "solutions": solutions}
 
     # D) Compose bundle
-    bundle = json.loads(json.dumps(ENGINE_BUNDLE_TEMPLATE))
+    bundle = _deepcopy_json(ENGINE_BUNDLE_TEMPLATE)
     root = bundle["adaptive_learning_engine_bundle"]
     root["instances"]["active_course_profile"] = course_profile
     root["instances"]["last_trainer_result"] = None
@@ -434,6 +443,9 @@ def grade_answer(
     base_url: Optional[str] = None,
     timeout_seconds: int = 180,
 ) -> Dict[str, Any]:
+    """
+    מחזיר trainer_result בהתאם לסכמה: score+diagnostics+sharpening_paragraph (+ improved_answer אם coach).
+    """
     if mode not in ("coach", "examiner"):
         raise ValueError("mode must be 'coach' or 'examiner'.")
 
@@ -474,12 +486,16 @@ def grade_exam_retry(
     *,
     student_answer: str,
     question_text: Optional[str] = None,
-    mode: str = "exam_retry",
+    mode: str = "exam_retry",  # fixed
     model: str = "qwen-plus-latest",
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     timeout_seconds: int = 220,
 ) -> Dict[str, Any]:
+    """
+    "מבחן לחזרה": משווה תשובת סטודנט גם לפתרונות המופת (solutions_bank),
+    נותן ציון, diagnostics, ו-comparison_to_solution עם coverage_score ונקודות חסרות/עודפות.
+    """
     course_profile = (bundle.get("adaptive_learning_engine_bundle", {}) or {}).get("instances", {}).get("active_course_profile")
     if not course_profile:
         raise ValueError("Bundle has no active_course_profile. Build a course bundle first.")
@@ -511,3 +527,20 @@ def grade_exam_retry(
     trainer_result = _extract_json_object(resp.choices[0].message.content)
     bundle["adaptive_learning_engine_bundle"]["instances"]["last_trainer_result"] = trainer_result
     return trainer_result
+
+
+# =========================
+# Example usage (local)
+# =========================
+if __name__ == "__main__":
+    knowledge = [{"name": "מחברת.txt", "text": "PAGE: 1\n...\nPAGE: 2\n..."}]
+    style = [{"name": "פתרון_מופת_2023.txt", "text": "PAGE: 1\nשאלה 1...\nפתרון: ...\nPAGE: 2\n..."}]
+
+    bundle = build_course_bundle(course_id="course_2026A", knowledge_docs=knowledge, style_docs=style)
+
+    r1 = grade_answer(bundle, question_text="שאלה לדוגמה...", student_answer="התשובה שלי...", mode="coach")
+    print(json.dumps(r1, ensure_ascii=False, indent=2))
+
+    r2 = grade_exam_retry(bundle, question_text="שאלה 1 ...", student_answer="התשובה שלי למבחן...")
+    print(json.dumps(r2, ensure_ascii=False, indent=2))
+
