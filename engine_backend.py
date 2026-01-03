@@ -7,6 +7,9 @@ from typing import List, Dict, Any, Optional
 
 from openai import OpenAI
 
+import streamlit as st
+st.write("✅ Streamlit loaded")
+
 
 # =========================
 # 1) SCHEMAS (קבוע בקוד)
