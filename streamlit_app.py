@@ -2,6 +2,16 @@ import os
 import json
 from datetime import datetime
 import streamlit as st
+import os
+import streamlit as st
+
+# טוען מפתח מה-Secrets אם קיים (בלי להדפיס אותו!)
+if "OPENAI_API_KEY" in st.secrets and not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+
+if "DASHSCOPE_API_KEY" in st.secrets and not os.getenv("DASHSCOPE_API_KEY"):
+    os.environ["DASHSCOPE_API_KEY"] = st.secrets["DASHSCOPE_API_KEY"]
+
 
 from engine_backend import build_course_bundle, grade_answer, grade_exam_retry, assistant_answer
 
