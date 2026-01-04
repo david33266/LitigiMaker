@@ -104,7 +104,8 @@ def render_file_list(title, dir_path, key_prefix):
 
         if col_btn.button("❌", key=f"{key_prefix}_{fname}"):
             delete_file(dir_path, fname)
-            st.experimental_rerun()
+            st.rerun()
+
 
 
 colA, colB = st.columns(2)
