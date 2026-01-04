@@ -256,16 +256,14 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return json.loads(m.group(0))
 
 
-def _default_base_url() -> str:
-    return os.getenv("DASHSCOPE_BASE_URL") or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-
-
-def _get_client(api_key: Optional[str] = None, base_url: Optional[str] = None, timeout_seconds: int = 180) -> OpenAI:
-    api_key = api_key or os.getenv("DASHSCOPE_API_KEY") or os.getenv("DASHSCOPE_APIKEY")
+def _get_client(
+    api_key: Optional[str] = None,
+    timeout_seconds: int = 180
+) -> OpenAI:
+    api_key = api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("Missing DASHSCOPE_API_KEY env var (or pass api_key=...).")
-    return OpenAI(api_key=api_key, base_url=base_url or _default_base_url(), timeout=timeout_seconds)
-
+        raise ValueError("Missing OPENAI_API_KEY env var (or pass api_key=...).")
+    return OpenAI(api_key=api_key, timeout=timeout_seconds)
 
 def _pack_docs_for_model(doc_registry: List[Dict[str, Any]], doc_text_by_id: Dict[str, str], only_style: bool = False) -> str:
     lines = ["DOC_REGISTRY:"]
