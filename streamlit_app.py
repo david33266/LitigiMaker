@@ -1,108 +1,113 @@
-import streamlit as st
 import os
+import streamlit as st
 
-from engine_mock import grade_answer
+# =========================
+# הגדרות בסיס
+# =========================
 
-# ---------------- Config ----------------
+BASE_DIR = "data"
+KNOWLEDGE_DIR = os.path.join(BASE_DIR, "knowledge")
+STYLE_DIR = os.path.join(BASE_DIR, "style")
+
+os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+os.makedirs(STYLE_DIR, exist_ok=True)
+
 st.set_page_config(
-    page_title="Adaptive Learning Engine",
-    layout="wide"
+    page_title="LitiGiMaker – העלאת חומרים",
+    layout="wide",
+    page_icon="⚖️"
 )
 
-# ---------------- Helpers ----------------
-def save_uploaded_files(files, target_dir):
+st.title("⚖️ LitiGiMaker – העלאת חומרים לקורס")
+
+# =========================
+# פונקציות עזר
+# =========================
+
+def save_uploaded_files(uploaded_files, target_dir):
+    saved = []
     os.makedirs(target_dir, exist_ok=True)
-    saved_paths = []
-    for f in files:
-        path = os.path.join(target_dir, f.name)
-        with open(path, "wb") as out:
-            out.write(f.getbuffer())
-        saved_paths.append(path)
-    return saved_paths
 
-def load_texts_from_dir(dir_path):
-    texts = []
-    if not os.path.exists(dir_path):
-        return texts
+    for file in uploaded_files:
+        file_path = os.path.join(target_dir, file.name)
+        with open(file_path, "wb") as f:
+            f.write(file.getbuffer())
+        saved.append(file.name)
 
-    for fname in os.listdir(dir_path):
-        if fname.endswith(".txt"):
-            with open(os.path.join(dir_path, fname), "r", encoding="utf-8") as rf:
-                texts.append(rf.read())
-    return texts
+    return saved
 
-# ---------------- UI ----------------
-st.title("⚖️ Adaptive Learning Engine")
-st.caption("העלאת קבצים + שמירה + בדיקה")
 
-# -------- Sidebar --------
-with st.sidebar:
-    st.header("📂 העלאת קבצים ושמירה")
-
-    mode = st.selectbox(
-        "בחר מצב בדיקה:",
-        ["אימון (Coach)", "בודק (Examiner)", "מבחן לחזרה"]
-    )
-
-    st.divider()
-
-    knowledge_files = st.file_uploader(
-        "📘 מחברות / סיכומים (TXT)",
-        type=["txt"],
-        accept_multiple_files=True
-    )
-
-    style_files = st.file_uploader(
-        "🧾 מבחנים פתורים / פתרונות (TXT)",
-        type=["txt"],
-        accept_multiple_files=True
-    )
-
-    if st.button("💾 שמור קבצים לדיסק"):
-        saved_list = []
-        if knowledge_files:
-            saved_list += save_uploaded_files(knowledge_files, "data/knowledge")
-        if style_files:
-            saved_list += save_uploaded_files(style_files, "data/style")
-
-        if saved_list:
-            st.success(f"נשמרו {len(saved_list)} קבצים")
+def list_saved_files():
+    files = {}
+    for section, path in {
+        "knowledge": KNOWLEDGE_DIR,
+        "style": STYLE_DIR
+    }.items():
+        if not os.path.exists(path):
+            files[section] = []
         else:
-            st.warning("לא נבחרו קבצים לשמירה")
+            files[section] = sorted(os.listdir(path))
+    return files
 
-# -------- Main --------
+
+# =========================
+# UI – העלאת קבצים
+# =========================
+
+st.markdown("## 📥 העלאת קבצים")
+
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📘 שאלה / נושא")
-    question = st.text_area("הכנס שאלה או נושא:", height=150)
+    st.subheader("📘 Knowledge (חומר לימוד)")
+    knowledge_files = st.file_uploader(
+        "העלה קבצי TXT למחברת / סיכומים",
+        type=["txt"],
+        accept_multiple_files=True,
+        key="knowledge_uploader"
+    )
 
 with col2:
-    st.subheader("✍️ תשובת הסטודנט")
-    answer = st.text_area("כתוב את התשובה שלך:", height=150)
+    st.subheader("📝 Style (פתרונות / מבחנים)")
+    style_files = st.file_uploader(
+        "העלה קבצי TXT של פתרונות ומבחנים",
+        type=["txt"],
+        accept_multiple_files=True,
+        key="style_uploader"
+    )
 
-st.divider()
+# =========================
+# כפתור שמירה
+# =========================
 
-if st.button("בדוק תשובה", type="primary", use_container_width=True):
+if st.button("💾 שמור קבצים לדיסק", type="primary"):
+    saved_any = False
 
-    if not answer.strip():
-        st.warning("חובה להזין תשובה")
+    if knowledge_files:
+        saved = save_uploaded_files(knowledge_files, KNOWLEDGE_DIR)
+        st.success(f"נשמרו {len(saved)} קבצי Knowledge")
+        saved_any = True
+
+    if style_files:
+        saved = save_uploaded_files(style_files, STYLE_DIR)
+        st.success(f"נשמרו {len(saved)} קבצי Style")
+        saved_any = True
+
+    if not saved_any:
+        st.warning("לא הועלו קבצים לשמירה")
+
+# =========================
+# הצגת קבצים שנשמרו
+# =========================
+
+st.markdown("## 📂 קבצים שנשמרו בשרת")
+
+files = list_saved_files()
+
+for section, items in files.items():
+    st.subheader(section)
+    if not items:
+        st.caption("אין קבצים")
     else:
-        # load files from data folders
-        knowledge_texts = load_texts_from_dir("data/knowledge")
-        style_texts = load_texts_from_dir("data/style")
-
-        result = grade_answer(
-            question=question,
-            answer=answer,
-            mode=mode,
-            knowledge_docs=knowledge_texts,
-            style_docs=style_texts
-        )
-
-        st.success(f"ציון: {result['score']}")
-        st.write(result["feedback"])
-
-        st.subheader("🛠️ אבחנות")
-        for item in result["diagnostics"]:
-            st.write(f"• {item}")
+        for f in items:
+            st.write("•", f)
