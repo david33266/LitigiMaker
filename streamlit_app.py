@@ -1,3 +1,7 @@
+import streamlit as st
+
+st.write("OPENAI_API_KEY in secrets:", "OPENAI_API_KEY" in st.secrets)
+
 import os
 import json
 from datetime import datetime
