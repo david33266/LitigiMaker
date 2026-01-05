@@ -121,7 +121,8 @@ if st.sidebar.button("🧠 Build bundle", type="primary", use_container_width=Tr
     if "OPENAI_API_KEY" not in st.secrets and not os.getenv("OPENAI_API_KEY"):
         st.sidebar.error("חסר OPENAI_API_KEY ב־Secrets.")
     else:
-        with st.sidebar.spinner("בונה Bundle..."):
+        with st.sidebar:
+    with st.spinner("בונה Bundle..."):
             b = build_bundle(course_id=course_id, model=model)
             st.sidebar.success("נבנה בהצלחה.")
             st.session_state["bundle"] = b
