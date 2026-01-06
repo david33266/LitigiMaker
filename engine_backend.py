@@ -200,27 +200,39 @@ def load_bundle(course_id: str) -> Optional[Dict[str, Any]]:
 # LLM helpers
 # ----------------------------
 
-def llm_json(client: OpenAI, model: str, system: str, user: str) -> Dict[str, Any]:
-    # Uses Responses API style through OpenAI SDK (compatible)
-    resp = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
-    # SDK gives output_text; for JSON use parsed from resp.output_text
-    text = resp.output_text
+import json
+import re
+
+def llm_json(client, model: str, system: str, user: str):
     try:
-        return json.loads(text)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+        content = resp.choices[0].message.content
+        return json.loads(content)
+
     except Exception:
-        # fallback: try to extract JSON block
-        m = re.search(r"\{.*\}", text, flags=re.S)
-        if m:
-            return json.loads(m.group(0))
-        raise
+        # fallback: בלי response_format ואז חילוץ JSON מתוך טקסט
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.2,
+        )
+        text = resp.choices[0].message.content or ""
+        m = re.search(r"\{[\s\S]*\}", text)
+        if not m:
+            raise ValueError(f"Model did not return JSON. Got: {text[:200]}")
+        return json.loads(m.group(0))
+
 
 
 # ----------------------------
